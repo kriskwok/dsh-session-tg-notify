@@ -86,7 +86,7 @@ dsh plugin --profile web add link:/绝对路径/dsh-session-tg-notify
 
 > 后台这一档为什么要求**锁屏**而不是「失焦」：切到别的应用、点一下浏览器外部都会让页面失焦，那时人还在电脑前，推手机是纯打扰。锁屏才是「人走了」的可靠信号。
 
-权威定义写在 `test/truth-table.mjs`：它把「状态 × 订阅组合 × 锁屏开关 × 实际锁屏」的全矩阵用**真实投递**跑一遍并对照期望断言。改路由逻辑必须先让这张表继续成立。
+上面这张表就是权威定义：**状态 × 订阅组合 × 锁屏开关 × 实际锁屏**的全矩阵，任何一格的改动都要同步这里。改路由逻辑时必须保证这张表仍然成立。
 
 ### 锁屏检测怎么工作
 
@@ -163,13 +163,6 @@ Telegram 的 bot **不能主动给人发消息** —— 它只能回复一个已
 | `POST /session-notify/test` | 逐事件测试推送 `{ kind, channel, clientId }` |
 | `POST /session-notify/telegram-check` | 校验 Bot Token 并返回 bot 身份 |
 
-## 测试
-
-```sh
-node test/smoke.mjs
-```
-
-零依赖，用假 ctx 驱动插件，覆盖三态路由、子代理过滤、去重、事件级开关、HTTP API 等 30 项断言。
 
 ## 已知限制
 
