@@ -34,7 +34,7 @@ import { readScreenLocked } from './screenlock.js';
 import { sendTelegram, getTelegramMe, getTelegramChats, getTelegramChat } from './telegram.js';
 
 export const name = 'session-notify';
-export const VERSION = '0.1.3';
+export const VERSION = '0.1.4';
 /** 只消费事件与 webServer，不依赖其他服务。 */
 export const inject = [];
 
