@@ -1,0 +1,56 @@
+{
+  "name": "dsh-session-tg-notify",
+  "version": "0.1.2",
+  "description": "DSH 会话通知插件：监控会话事件（完成 / 审批 / 提问 / 受阻 / 出错），按浏览器前后台与锁屏状态路由到页面内 toast、系统通知或 Telegram，点击通知直达对应会话。",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./config.js": "./src/config.js",
+    "./events.js": "./src/events.js",
+    "./presence.js": "./src/presence.js",
+    "./screenlock.js": "./src/screenlock.js",
+    "./telegram.js": "./src/telegram.js",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "notification",
+    "telegram",
+    "plugin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kriskwok/dsh-session-tg-notify.git"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ]
+    }
+  },
+  "homepage": "https://github.com/kriskwok/dsh-session-tg-notify#readme",
+  "bugs": {
+    "url": "https://github.com/kriskwok/dsh-session-tg-notify/issues"
+  }
+}

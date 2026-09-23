@@ -1,0 +1,16 @@
+# 依赖与构建产物
+node_modules/
+*.tgz
+
+# 本地运行时状态（含 Telegram 凭据，绝不能提交）
+*.local.json
+config.local.json
+
+# 环境相关的本地运维脚本（作者本机专用，发布了会误导别人直接跑）
+scripts/
+
+# 编辑器 / 系统
+.DS_Store
+*.swp
+.idea/
+.vscode/

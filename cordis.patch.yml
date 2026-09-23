@@ -1,0 +1,6 @@
+# dsh-session-tg-notify bundle layer
+# 由 `dsh plugin --profile <name> add` 安装时应用：向 profile 组合插入本插件行。
+# node 半负责事件订阅 / 状态路由 / HTTP API，client 半负责状态上报与通知呈现。
+- insert:
+    - id: session-notify
+      name: 'dsh-session-tg-notify'

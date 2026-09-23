@@ -1,0 +1,177 @@
+/**
+ * dsh-session-tg-notify — 在线状态 + SSE 推送 hub。
+ *
+ * 关键设计：**SSE 长连接本身就是存活信号**。浏览器端与后端之间只有一条
+ * 通道（`GET /session-notify/events`），它同时承担：
+ *   1. 存活判定 —— 连接存在即页面开着；连接关闭（含页面关闭、标签被回收）
+ *      即视为离线，后端据此把通知改走 Telegram。
+ *   2. 前后台判定 —— 客户端通过 `POST /session-notify/presence` 上报
+ *      `{ visibility, focused }`，二者可随窗口焦点变化即时更新。
+ *   3. 通知下发 —— 后端按判定结果推 `toast` / `webnotify` 帧。
+ *
+ * 三态（在线只看连接，心跳只管焦点）：
+ *   - foreground：存在连接，且**新鲜**的焦点上报是 visible + focused
+ *   - background：存在连接但没有新鲜的前台信息
+ *   - offline   ：**没有任何连接**（页面确实关了）
+ *
+ * 曾经把「心跳过期」也算成 offline，结果被 Chrome 的后台标签页定时器节流误伤：
+ * 页面开着、只是被切走久了，就被判成离线并错误地改走 Telegram。
+ *
+ * 多标签页：只要**任一**标签页处于前台就算 foreground（用户在看着 DSH）；
+ * 通知只发给“最合适的那一个”标签页（前台优先，否则最近上报的），避免多标签
+ * 重复弹窗。
+ */
+export function createPresenceHub(options = {}) {
+	const ttlMs = Number.isSafeInteger(options.ttlMs) && options.ttlMs >= 5000 ? options.ttlMs : 30000;
+	const maxConnections = Number.isSafeInteger(options.maxConnections) && options.maxConnections > 0
+		? options.maxConnections
+		: 16;
+
+	/** clientId → { res, lastSeen, visibility, focused } */
+	const clients = new Map();
+	let timer = null;
+
+	const now = () => Date.now();
+
+	/** 正常关闭时立即移除；用于推导 offline。 */
+	const detach = (clientId) => {
+		clients.delete(clientId);
+		stopHeartbeatIfIdle();
+	};
+
+	const stopHeartbeatIfIdle = () => {
+		if (clients.size > 0 || timer === null) return;
+		clearInterval(timer);
+		timer = null;
+	};
+
+	const writeFrame = (res, event, data) => {
+		try {
+			res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+
+	/** 心跳注释帧，防止中间的代理掐断 idle 连接。 */
+	const startHeartbeat = () => {
+		if (timer !== null) return;
+		timer = setInterval(() => {
+			for (const res of [...clients.values()].map((c) => c.res)) {
+				try {
+					res.write(`: hb ${now()}\n\n`);
+				} catch {
+					// 断开的连接由 close 事件清理
+				}
+			}
+		}, 15000);
+		if (typeof timer.unref === 'function') timer.unref();
+	};
+
+	/**
+	 * 接管一个 SSE 连接。
+	 * @param clientId - 浏览器端为每个标签页生成的稳定标识。
+	 * @param res - node HTTP 响应对象。
+	 * @param ready - ready 帧载荷（服务端状态快照）。
+	 * @returns 是否成功接管（false = 超出连接上限）。
+	 */
+	const attach = (clientId, res, ready = {}) => {
+		if (clients.size >= maxConnections) return false;
+		res.writeHead(200, {
+			'content-type': 'text/event-stream',
+			'cache-control': 'no-cache, no-transform',
+			connection: 'keep-alive',
+			'x-accel-buffering': 'no'
+		});
+		clients.set(clientId, { res, lastSeen: now(), visibility: 'visible', focused: false });
+		writeFrame(res, 'ready', { ...ready, clientId });
+		res.on('close', () => {
+			console.log(`[session-notify] 页面连接断开（剩余 ${clients.size - 1} 个）`);
+			detach(clientId);
+		});
+		console.log(`[session-notify] 页面连接建立（clientId=${clientId}，共 ${clients.size} 个）`);
+		startHeartbeat();
+		return true;
+	};
+
+	/** 更新某个客户端的可见性/焦点；返回是否命中已知连接。 */
+	const update = (clientId, patch = {}) => {
+		const client = clients.get(clientId);
+		if (!client) return false;
+		client.lastSeen = now();
+		if (patch.visibility === 'visible' || patch.visibility === 'hidden') client.visibility = patch.visibility;
+		if (typeof patch.focused === 'boolean') client.focused = patch.focused;
+		return true;
+	};
+
+	/** 广播一帧给所有在线客户端。 */
+	const broadcast = (event, data) => {
+		for (const client of clients.values()) writeFrame(client.res, event, data);
+	};
+
+	/** 推给单个客户端（通知类帧用，避免多标签重复弹窗）。 */
+	const sendTo = (clientId, event, data) => {
+		const client = clients.get(clientId);
+		return client ? writeFrame(client.res, event, data) : false;
+	};
+
+	/**
+	 * 三态快照；同时返回通知应该落到哪个标签页。
+	 *
+	 * 关键区分（曾经在这里踩过坑）：
+	 *   - **在线** = SSE 连接还开着。连接存在就是页面存在的证据。
+	 *   - **心跳新鲜度**只用来判断「焦点信息还算不算数」，不用来判断生死。
+	 *
+	 * 不能拿心跳当存活依据：Chrome 对隐藏超过约 5 分钟的标签页会把 setInterval
+	 * 节流到每分钟一次，10 秒的心跳会变成 60 秒，远超任何合理的 TTL ——
+	 * 页面明明开着却会被判成离线，通知被错误地改走 Telegram。
+	 *
+	 * 焦点信息过期时退化为 background（而不是 offline）：这是保守的一侧 ——
+	 * 后台只会发系统通知（点击仍能直达会话），而离线会跳过桌面通道。
+	 */
+	const snapshot = () => {
+		if (clients.size === 0) {
+			return { state: 'offline', targetClientId: null, count: 0, foregroundCount: 0 };
+		}
+		const all = [...clients.entries()];
+		const fresh = all.filter(([, c]) => now() - c.lastSeen <= ttlMs);
+		const foreground = fresh.filter(([, c]) => c.visibility === 'visible' && c.focused === true);
+		if (foreground.length > 0) {
+			// 多个前台标签页时取最近上报的那个
+			const [clientId] = foreground.reduce((a, b) => (b[1].lastSeen > a[1].lastSeen ? b : a));
+			return { state: 'foreground', targetClientId: clientId, count: all.length, foregroundCount: foreground.length };
+		}
+		// 没有新鲜的前台信息：有连接就算后台，优先挑心跳较新的那个
+		const pool = fresh.length > 0 ? fresh : all;
+		const [clientId] = pool.reduce((a, b) => (b[1].lastSeen > a[1].lastSeen ? b : a));
+		return { state: 'background', targetClientId: clientId, count: all.length, foregroundCount: 0 };
+	};
+
+	const dispose = () => {
+		if (timer !== null) {
+			clearInterval(timer);
+			timer = null;
+		}
+		for (const { res } of clients.values()) {
+			try {
+				res.end();
+			} catch {
+				// 已关闭的连接忽略
+			}
+		}
+		clients.clear();
+	};
+
+	return {
+		attach,
+		update,
+		broadcast,
+		sendTo,
+		snapshot,
+		dispose,
+		get size() {
+			return clients.size;
+		}
+	};
+}
