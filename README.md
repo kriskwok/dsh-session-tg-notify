@@ -10,11 +10,19 @@ DSH 会话通知插件：监控会话事件，按**浏览器前后台状态**自
 
 ## 安装
 
+从 npm 安装（推荐）：
+
+```sh
+dsh plugin --profile web add dsh-session-tg-notify
+```
+
+装完需要重启 DSH 进程才会加载插件。
+
+开发时用 `link:` 安装本仓库，改完源码只需重启，不必重新安装：
+
 ```sh
 dsh plugin --profile web add link:/绝对路径/dsh-session-tg-notify
 ```
-
-`link:` 安装会建立软链接，改完源码重启 DSH 即生效，不需要重新安装。
 
 ## 使用
 
