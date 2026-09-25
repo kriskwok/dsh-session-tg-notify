@@ -107,15 +107,48 @@ export function createPresenceHub(options = {}) {
 		return true;
 	};
 
+	/**
+	 * 最近若干次下发记录（诊断用）。
+	 *
+	 * 为什么需要：`/test` 端点返回 `delivered:true` 只代表「写进了 SSE 连接」，
+	 * 不代表客户端真的执行了。一旦「面板测试能弹、实际事件不弹」，光看宿主日志
+	 * 无法区分是**路由选错了帧**（该发 webnotify 却发了 toast）还是**客户端收到
+	 * 后没执行**。把最近下发的帧记下来就能一眼定位。
+	 *
+	 * 两条下发路径都要记：`sendTo`（真实事件与面板测试都走它）与 `broadcast`
+	 * （`/test` 未指定 clientId 时的回退）。早先只记了 sendTo，导致手测
+	 * `/test` 明明 delivered 却查不到任何记录，一度误判成「插件没加载新代码」。
+	 */
+	let recentFrames = [];
+	const rememberFrame = (channel, event, clientId, data) => {
+		recentFrames.unshift({
+			channel,
+			event,
+			clientId,
+			kind: data?.kind ?? null,
+			title: data?.title ?? null,
+			// body 与 sessionId 也要记：真实事件和面板测试的差别可能藏在正文里
+			// （例如正文为空时某些平台会不弹横幅），只记 title 会漏掉这类线索。
+			body: data?.body ?? null,
+			sessionId: data?.sessionId ?? null,
+			tone: data?.tone ?? null,
+			at: new Date().toISOString()
+		});
+		if (recentFrames.length > 20) recentFrames = recentFrames.slice(0, 20);
+	};
+
 	/** 广播一帧给所有在线客户端。 */
 	const broadcast = (event, data) => {
 		for (const client of clients.values()) writeFrame(client.res, event, data);
+		rememberFrame('broadcast', event, null, data);
 	};
 
 	/** 推给单个客户端（通知类帧用，避免多标签重复弹窗）。 */
 	const sendTo = (clientId, event, data) => {
 		const client = clients.get(clientId);
-		return client ? writeFrame(client.res, event, data) : false;
+		const ok = client ? writeFrame(client.res, event, data) : false;
+		rememberFrame(ok ? 'desktop' : 'dropped', event, clientId, data);
+		return ok;
 	};
 
 	/**
@@ -172,6 +205,10 @@ export function createPresenceHub(options = {}) {
 		sendTo,
 		snapshot,
 		dispose,
+		/** 最近下发记录（诊断用，见 rememberFrame 的说明）。 */
+		get recentFrames() {
+			return recentFrames;
+		},
 		get size() {
 			return clients.size;
 		}

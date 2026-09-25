@@ -295,6 +295,10 @@ window.__ModuleLoader__.load({
 				return function () { style.remove(); };
 			}, "dsh-session-tg-notify: styles");
 
+			// 通知序号：宿主给的是毫秒时间戳，同一毫秒内连续到达的两条事件会撞 tag，
+			// 又会退回「静默替换」。这里用一个单调递增的本地序号兜底。
+			var notifySeq = 0;
+
 			// ---- 通知呈现
 			ctx.effect(function () {
 				tone.attachUnlock();
@@ -316,7 +320,13 @@ window.__ModuleLoader__.load({
 					var note = new Notification(payload.title || "DSH 通知", {
 						body: payload.body || "", 
 						// body 末尾已带「工作区名称」，无需再拼页脚
-						tag: "dsh-session-tg-notify:" + (payload.kind || "event"),
+						//
+						// tag 必须每条唯一。早先只用事件类型做 tag，于是同一类型的
+						// 第二条通知会**静默替换**通知中心里还挂着的那条：macOS 不再弹
+						// 横幅、也不再响铃。表现就是「偶尔收不到」，且很难复现——间隔久了
+						// 旧通知已被清走就又能弹。所以这里拼上会话、事件类型和宿主给的
+						// 唯一 at（毫秒时间戳），保证每条都是独立条目。
+						tag: "dsn:" + (payload.sessionId || "na") + ":" + (payload.kind || "event") + ":" + (payload.at || 0) + ":" + (++notifySeq),
 						// 合成音已播放时抑制系统音；未解锁则让系统出默认声，保证一定有声音
 						silent: played
 					});
@@ -529,6 +539,25 @@ window.__ModuleLoader__.load({
 				top.append(master, masterLabel, stateWrap);
 				head.append(top);
 				body.append(head);
+
+				// ---- 「会话完成」的最短时长阈值
+				// 以前这个阈值只能改配置文件、面板里完全没有入口，于是「发个『你好』
+				// 这种几秒结束的 turn 收不到通知」看起来像插件坏了。
+				var minRow = el("div", "dsn-row");
+				minRow.append(el("span", "dsn-grow", "最短完成时长（秒，0 = 不过滤）"));
+				var minInput = el("input", "dsn-input");
+				minInput.type = "number";
+				minInput.min = "0";
+				minInput.step = "1";
+				minInput.style.width = "80px";
+				minInput.value = String(config.minDuration === undefined ? 0 : config.minDuration);
+				minInput.addEventListener("change", function () {
+					var n = parseInt(minInput.value, 10);
+					if (!isFinite(n) || n < 0) { minInput.value = String(config.minDuration || 0); return; }
+					save({ minDuration: n }, n === 0 ? "已关闭时长过滤" : "已设为 " + n + " 秒");
+				});
+				minRow.append(minInput);
+				body.append(minRow);
 
 				// ---- 逐事件：桌面 / Telegram / 测试
 				var evSec = el("div", "dsn-sec");

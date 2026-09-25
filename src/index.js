@@ -34,7 +34,7 @@ import { readScreenLocked } from './screenlock.js';
 import { sendTelegram, getTelegramMe, getTelegramChats, getTelegramChat } from './telegram.js';
 
 export const name = 'session-notify';
-export const VERSION = '0.1.5';
+export const VERSION = '0.1.6';
 /** 只消费事件与 webServer，不依赖其他服务。 */
 export const inject = [];
 
@@ -253,8 +253,18 @@ export function apply(ctx, cordisConfig = {}, options = {}) {
 			const complete = classifyTurnEnd(session, turns2.onTurnEnd(session, event));
 			if (!complete) return;
 			const durationMs = complete.detail?.durationMs;
-			// 时长过滤：短于 minDuration 的 turn 不打扰（未知时长按通过处理）。
-			if (typeof durationMs === 'number' && durationMs < config.minDuration * 1000) return;
+			// 时长过滤：短于 minDuration 的 turn 不打扰。
+			//
+			// 这里**必须留日志**：早先直接 return，导致「发个『你好』这种短消息
+			// 收不到通知」既没有任何通知、也没有任何记录，看起来像是插件坏了。
+			// 静默丢弃 + 无痕迹 = 最难排查的一类问题。
+			if (typeof durationMs === 'number' && durationMs < config.minDuration * 1000) {
+				console.log(
+					`[session-notify] ⏱ complete 被时长过滤丢弃（${Math.round(durationMs / 1000)}s < minDuration=${config.minDuration}s）` +
+					`${config.minDuration > 0 ? '，可在设置里调小或设为 0' : ''}`
+				);
+				return;
+			}
 			void deliver(complete, session);
 		}
 	});
@@ -290,6 +300,9 @@ export function apply(ctx, cordisConfig = {}, options = {}) {
 			presence: hub.snapshot(),
 			// 面板的状态行要显示「锁屏推送」是否真的生效，所以这里带上实时锁屏状态
 			screen: lastScreen,
+			// 诊断：最近下发过哪些帧。面板测试能弹但实际事件不弹时，用它区分
+			//「路由选错了帧」与「客户端收到了但没执行」。
+			recentFrames: hub.recentFrames,
 			events: EVENT_META,
 			// configPath 给 curl/运维用；configPathDisplay 是收敛成 ~/... 的版本，
 			// 界面只允许用后者，避免把用户名渲染进 UI。

@@ -41,8 +41,14 @@ export const TONES = Object.freeze(['ding', 'alert', 'chime', 'none']);
 /** 默认配置。 */
 export const DEFAULT_CONFIG = Object.freeze({
 	enabled: true,
-	/** complete 事件的最短 turn 时长（秒），低于此值不通知，避免短任务刷屏。 */
-	minDuration: 10,
+	/**
+	 * complete 事件的最短 turn 时长（秒），低于此值不通知。0 = 不做时长过滤。
+	 *
+	 * 默认 0（全部通知）。早先默认 10，结果「发个『你好』这种几秒就结束的
+	 * turn」被静默丢弃——既不通知也没日志，看起来像插件坏了。想防短任务刷屏
+	 * 请在设置面板里自行调大。
+	 */
+	minDuration: 0,
 	events: Object.freeze({
 		complete: Object.freeze({ desktop: true, telegram: false }),
 		approval: Object.freeze({ desktop: true, telegram: true }),
