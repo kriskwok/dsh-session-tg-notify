@@ -87,8 +87,10 @@ export function createPresenceHub(options = {}) {
 		clients.set(clientId, { res, lastSeen: now(), visibility: 'visible', focused: false });
 		writeFrame(res, 'ready', { ...ready, clientId });
 		res.on('close', () => {
-			console.log(`[session-notify] 页面连接断开（剩余 ${clients.size - 1} 个）`);
+			// 先 detach 再记录剩余数：反过来的话 clients.size 还没减，
+			// 只能靠 -1 硬凑，日志会打出「剩余 -1 个」这种误导性的值。
 			detach(clientId);
+			console.log(`[session-notify] 页面连接断开（剩余 ${clients.size} 个）`);
 		});
 		console.log(`[session-notify] 页面连接建立（clientId=${clientId}，共 ${clients.size} 个）`);
 		startHeartbeat();

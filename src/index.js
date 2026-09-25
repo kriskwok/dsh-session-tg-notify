@@ -34,7 +34,7 @@ import { readScreenLocked } from './screenlock.js';
 import { sendTelegram, getTelegramMe, getTelegramChats, getTelegramChat } from './telegram.js';
 
 export const name = 'session-notify';
-export const VERSION = '0.1.4';
+export const VERSION = '0.1.5';
 /** 只消费事件与 webServer，不依赖其他服务。 */
 export const inject = [];
 
@@ -55,6 +55,17 @@ export function apply(ctx, cordisConfig = {}, options = {}) {
 
 	// ------------------------------------------------------------ 锁屏探测
 	/**
+	 * 锁屏档可以被环境变量显式关闭。存在的理由：DSH 跑在 Linux 远程服务器上时
+	 * 宿主读不到你的屏幕锁屏状态，那一档本来就不会触发；显式关掉能让设置面板
+	 * 诚实地显示「已禁用」，而不是让人以为开关在工作。
+	 *   DSH_SESSION_TG_NOTIFY_SCREENLOCK=off  → 永远报告 supported:false
+	 */
+	const screenlockEnabled = String(process.env.DSH_SESSION_TG_NOTIFY_SCREENLOCK ?? '').toLowerCase() !== 'off';
+	if (!screenlockEnabled) {
+		console.log('[session-notify] 锁屏探测已被 DSH_SESSION_TG_NOTIFY_SCREENLOCK=off 关闭');
+	}
+
+	/**
 	 * 最近一次锁屏探测结果。锁屏只在「后台 + 订阅了 TG + 开了锁屏推送」这一种
 	 * 组合下影响路由，所以平时不轮询、按需探测；设置页读取时也会强制探一次，
 	 * 让面板上的状态行始终是实时的。
@@ -63,7 +74,7 @@ export function apply(ctx, cordisConfig = {}, options = {}) {
 	let lastScreen = { supported: null, locked: false, signal: 'unknown', at: 0 };
 
 	const probeScreenLocked = async () => {
-		const result = await lockProbe();
+		const result = screenlockEnabled ? await lockProbe() : { supported: false, locked: false, signal: 'disabled' };
 		lastScreen = { ...result, at: Date.now() };
 		return lastScreen;
 	};
@@ -76,7 +87,7 @@ export function apply(ctx, cordisConfig = {}, options = {}) {
 	 * 便于区分是 ioreg 命中还是屏保兜底。
 	 */
 	const lockPollMs = Number.isSafeInteger(options.lockPollMs) ? options.lockPollMs : 20000;
-	if (lockPollMs > 0 && typeof ctx.effect === 'function') {
+	if (screenlockEnabled && lockPollMs > 0 && typeof ctx.effect === 'function') {
 		ctx.effect(() => {
 			let previous = null;
 			const timer = setInterval(() => {
